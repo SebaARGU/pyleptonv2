@@ -8,7 +8,7 @@ from datetime import datetime
 import cv2
 import numpy as np
 
-from lepton.spi import LeptonSPI, FRAME_ROWS, FRAME_COLS
+from lepton.spi import LeptonSPI, LeptonTimeoutError, FRAME_ROWS, FRAME_COLS
 from lepton.colormaps import (
     apply_colormap,
     COLORMAP_GRAYSCALE,
@@ -203,8 +203,25 @@ def run_live_view(args):
         fps_timer = time.monotonic()
         fps_str = ""
 
+        last_display = None
+
         while True:
-            raw = lepton.get_frame()
+            try:
+                raw = lepton.get_frame()
+            except LeptonTimeoutError:
+                if last_display is not None:
+                    overlay = last_display.copy()
+                    cv2.rectangle(overlay, (0, 0), (disp_w, disp_h), (0, 0, 0), -1)
+                    cv2.addWeighted(overlay, 0.55, last_display, 0.45, 0, last_display)
+                    _put_text_shadowed(last_display, "SIGNAL LOST",
+                                       (disp_w // 2 - 90, disp_h // 2),
+                                       0.9, (0, 60, 255), 2)
+                    _put_text_shadowed(last_display, "check SPI wiring",
+                                       (disp_w // 2 - 80, disp_h // 2 + 30),
+                                       0.55, (200, 200, 200))
+                    cv2.imshow("Lepton Thermal Camera", last_display)
+                    cv2.waitKey(500)
+                continue
             frame_count += 1
 
             if frame_count % 30 == 0:
@@ -225,6 +242,7 @@ def run_live_view(args):
             info = f"{colormap_name(cmap_id)}  |  {fps_str}"
             _put_text_shadowed(display, info, (8, disp_h - 10), 0.5, (200, 200, 200))
 
+            last_display = display.copy()
             cv2.imshow("Lepton Thermal Camera", display)
             key = cv2.waitKey(1) & 0xFF
 

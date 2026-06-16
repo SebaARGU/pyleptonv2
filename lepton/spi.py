@@ -14,8 +14,12 @@ VOSPI_FRAME_SIZE = VOSPI_PACKET_SIZE * FRAME_ROWS
 PIXEL_DATA_OFFSET = 4
 HEADER_NOT_READY = 0x0F
 
-# Maximo absoluto segun el datasheet del Lepton. Nunca lo superamos.
 SPI_MAX_SPEED_HZ = 20000000
+CAPTURE_TIMEOUT_S = 3.0
+
+
+class LeptonTimeoutError(IOError):
+    pass
 
 
 def _parse_spidev_path(device):
@@ -87,8 +91,15 @@ class LeptonSPI:
         # sincronia se descarta el frame entero y se reinicia desde la fila 0.
         frame = bytearray(VOSPI_FRAME_SIZE)
         resets = 0
+        deadline = time.monotonic() + CAPTURE_TIMEOUT_S
 
         while True:
+            if time.monotonic() > deadline:
+                raise LeptonTimeoutError(
+                    f"No valid frame received in {CAPTURE_TIMEOUT_S}s — "
+                    "check SPI wiring and camera power."
+                )
+
             row = 0
             errors = 0
             while row < FRAME_ROWS:
@@ -99,23 +110,22 @@ class LeptonSPI:
                     time.sleep(0.001)
                     errors += 1
                     if errors > 300:
-                        break          # demasiados descartes: reiniciar frame
+                        break
                     continue
 
                 if number != row:
                     time.sleep(0.001)
-                    break              # desincronizado: reiniciar frame
+                    break
 
                 offset = row * VOSPI_PACKET_SIZE
                 frame[offset:offset + VOSPI_PACKET_SIZE] = packet
                 row += 1
 
             if row == FRAME_ROWS:
-                break                  # frame completo
+                break
 
             resets += 1
             if resets >= 750:
-                # El Lepton necesita ~setup; pausa larga para que re-sincronice.
                 resets = 0
                 time.sleep(0.75)
 
