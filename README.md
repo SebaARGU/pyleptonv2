@@ -39,7 +39,7 @@ Optional: `pip install smbus2` for I2C control.
 | MISO   | 21       |
 | CLK    | 23       |
 
-See `ARRANQUE_SEGURO.md` for detailed cabling and first-boot steps.
+See `HARDWARE_SETUP.md` for detailed cabling and first-boot steps.
 
 ## Usage
 
@@ -88,6 +88,6 @@ Note: sensor accuracy is ±5°C — emissivity correction improves systematic bi
 
 ## References
 
+- `HARDWARE_SETUP.md` — wiring, first boot, and troubleshooting
 - `PLAN.md` — architecture and design decisions
-- `FINDINGS.md` — technical details extracted from the reference C codebase
-- `ARRANQUE_SEGURO.md` — hardware setup and safety guide (Spanish)
+- `FINDINGS.md` — VoSPI and CCI protocol details from the FLIR reference codebase

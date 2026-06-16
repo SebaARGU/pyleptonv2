@@ -1,341 +1,255 @@
-# Hallazgos Técnicos del Repositorio LeptonModule
+# Technical Findings — LeptonModule Reference Repository
 
-## Resumen del repositorio
+## Repository overview
 
-**LeptonModule** (GroupGets/PureEngineering) contiene código de referencia
-en C/C++ para la cámara térmica FLIR Lepton sobre Raspberry Pi, BeagleBone
-Black, Arduino, STM32, y Windows. **No contiene código Python funcional.**
-El proyecto `pylepton` (GroupGets) está obsoleto (README: *"this software no longer works"*).
+**LeptonModule** (GroupGets/PureEngineering) contains C/C++ reference code for the FLIR Lepton on Raspberry Pi, BeagleBone Black, Arduino, STM32, and Windows. It does not contain functional Python code. The `pylepton` project (GroupGets) is deprecated (README: *"this software no longer works"*).
 
-## 1. Protocolo VoSPI (Video SPI)
+## 1. VoSPI Protocol
 
-### Configuración SPI
+### SPI configuration
 
-| Parámetro | `leptsci.c` (flirpi) | `SPI.cpp` (raspberrypi_video) | `LeptonThread.cpp` (raspberrypi_qt) |
+| Parameter | `leptsci.c` (flirpi) | `SPI.cpp` (raspberrypi_video) | `LeptonThread.cpp` (raspberrypi_qt) |
 |---|---|---|---|
-| Dispositivo | `/dev/spidev0.0` | `/dev/spidev0.0` (CS0) / `0.1` (CS1) | `/dev/spidev0.1` |
+| Device | `/dev/spidev0.0` | `/dev/spidev0.0` (CS0) / `0.1` (CS1) | `/dev/spidev0.1` |
 | SPI mode | 0 (CPOL=0, CPHA=0) | 3 (CPOL=1, CPHA=1) | 0 |
-| Velocidad | 16 MHz | 10 MHz (configurable 20 MHz) | 16 MHz |
-| Bits/palabra | 8 | 8 | 8 |
+| Speed | 16 MHz | 10 MHz (configurable to 20 MHz) | 16 MHz |
+| Bits/word | 8 | 8 | 8 |
 
-> Ambos modos 0 y 3 funcionan. El modo 0 se alinea con el driver de FLIR
-> (`leptsci.c`). La velocidad debe ser ≤ 20 MHz según especificación.
+Both modes 0 and 3 work. Mode 0 matches the FLIR driver (`leptsci.c`). Speed must be ≤ 20 MHz per specification.
 
-### Estructura del paquete VoSPI
+### VoSPI packet structure
 
-Cada paquete son **164 bytes** = 4 header + 80 píxeles (2 bytes c/u):
-
-```
-Byte 0:    [bits 7-4: segmento (solo Lepton 3.x)] [bits 3-0: flags]
-             flags=0x0F → cámara no lista, descartar paquete
-Byte 1:    Número de fila (0-59 para Lepton 2.x)
-Byte 2-3:  CRC (no se verifica en ejemplos del repo)
-Byte 4-163:  80 píxeles de 16-bit en big-endian (MSB first)
-```
-
-**Frame completo**: 60 paquetes × 164 bytes = **9840 bytes** (Lepton 2.x 80×60)
-
-### Algoritmo de captura (de `leptsci.c` y `LeptonThread.cpp`)
+Each packet is **164 bytes** = 4 header + 80 pixels (2 bytes each):
 
 ```
-while fila < 60:
-    leer 164 bytes de SPI
-    if (packet[0] & 0x0F) == 0x0F:   # no listo
-        esperar 1 ms
-        continuar
-    if packet[1] != fila:             # fuera de sync
-        resetear scan (fila = 0)
+Byte 0:    [bits 7-4: segment (Lepton 3.x only)] [bits 3-0: flags]
+             flags=0x0F → camera not ready, discard packet
+Byte 1:    Row number (0-59 for Lepton 2.x)
+Byte 2-3:  CRC (not verified in reference examples)
+Byte 4-163: 80 pixels, 16-bit big-endian (MSB first)
+```
+
+**Full frame:** 60 packets × 164 bytes = **9840 bytes** (Lepton 2.x, 80×60)
+
+### Capture algorithm (from `leptsci.c` and `LeptonThread.cpp`)
+
+```
+while row < 60:
+    read 164 bytes from SPI
+    if (packet[0] & 0x0F) == 0x0F:   # not ready
+        sleep 1 ms
+        continue
+    if packet[1] != row:              # out of sync
+        reset scan (row = 0)
         if resets > 750: reboot()
-        continuar
-    extraer 80 píxeles del packet[4..163]
-    fila += 1
+        continue
+    extract 80 pixels from packet[4..163]
+    row += 1
 ```
 
-### Extracción de píxeles
+### Pixel extraction
 
-Del `leptsci.c` líneas 98-100:
+From `leptsci.c` lines 98-100:
 ```c
 for (i = 0; i < 80; i++)
     img[row * 80 + i] = (lepacket[2 * i + 4] << 8) | lepacket[2 * i + 5];
 ```
 
-Cada píxel son 2 bytes en big-endian dentro del paquete:
+Each pixel is 2 bytes, big-endian:
 ```
 pixel[col] = (packet[4 + 2*col] << 8) | packet[5 + 2*col]
 ```
 
-En Python:
+In Python:
 ```python
 pixels = np.frombuffer(packet[4:], dtype=np.uint16).newbyteorder('B')
 ```
 
-### Detección de duplicados
+### Duplicate frame detection
 
-El Lepton envía el mismo frame a ~27 FPS interno, pero la imagen cambia
-solo a ~9 FPS. El `LeptonThread.cpp` no detecta duplicados explícitamente;
-procesa cada frame recibido. Una estrategia simple es comparar la suma del
-frame anterior vs el actual.
+The Lepton outputs at ~27 FPS internally but the scene updates at ~9 FPS. `LeptonThread.cpp` does not detect duplicates explicitly. A simple approach is to compare the current frame checksum against the previous one.
 
-## 2. Protocolo CCI (I2C Control)
+## 2. CCI Protocol (I2C)
 
-### Dirección I2C
+### I2C address
 
-De `LEPTON_I2C_Reg.h` línea 83:
+From `LEPTON_I2C_Reg.h` line 83:
 ```c
 #define LEP_I2C_DEVICE_ADDRESS  0x2A  // 7-bit address
 ```
 7-bit: `0x2A` — 8-bit write: `0x54`, 8-bit read: `0x55`
 
-### Registros del controlador CCI
+### CCI register map
 
-| Dirección | Nombre | Descripción |
+| Address | Name | Description |
 |---|---|---|
-| `0x0000` | `LEP_I2C_POWER_REG` | Encender/apagar módulo |
-| `0x0002` | `LEP_I2C_STATUS_REG` | Bit 0: busy (1=ocupado, 0=listo) |
-| `0x0004` | `LEP_I2C_COMMAND_REG` | Escribir ID de comando (16-bit) |
-| `0x0006` | `LEP_I2C_DATA_LENGTH_REG` | Longitud de datos en bytes |
-| `0x0008` | `LEP_I2C_DATA_0_REG` | Primer word de datos |
-| `0x000A`..`0x0026` | `LEP_I2C_DATA_1..15_REG` | Datos adicionales |
+| `0x0000` | `LEP_I2C_POWER_REG` | Module power on/off |
+| `0x0002` | `LEP_I2C_STATUS_REG` | Bit 0: busy (1=busy, 0=ready) |
+| `0x0004` | `LEP_I2C_COMMAND_REG` | Write command ID (16-bit) |
+| `0x0006` | `LEP_I2C_DATA_LENGTH_REG` | Data length in bytes |
+| `0x0008` | `LEP_I2C_DATA_0_REG` | First data word |
+| `0x000A..0x0026` | `LEP_I2C_DATA_1..15_REG` | Additional data words |
 | `0x0028` | `LEP_I2C_DATA_CRC_REG` | CRC |
-| `0xF800` | `LEP_DATA_BUFFER_0` | Buffer grande de datos (1 KB) |
-| `0xFC00` | `LEP_DATA_BUFFER_1` | Buffer grande de datos (1 KB) |
+| `0xF800` | `LEP_DATA_BUFFER_0` | Large data buffer (1 KB) |
+| `0xFC00` | `LEP_DATA_BUFFER_1` | Large data buffer (1 KB) |
 
-### Flujo de comando CCI
+### CCI command flow
 
 ```
-1. Esperar hasta STATUS_REG bit 0 == 0   (no busy)
-2. Si hay datos de entrada:
-   - Escribir DATA_LENGTH_REG = numero_de_bytes
-   - Escribir datos en DATA_0_REG..DATA_N_REG
-   - Sino: DATA_LENGTH_REG = 0
-3. Escribir COMMAND_REG con el ID del comando
-4. Esperar hasta STATUS_REG bit 0 == 0   (comando completado)
-5. Leer DATA_LENGTH_REG para saber cuántos bytes de respuesta
-6. Leer DATA_0_REG..DATA_N_REG para la respuesta
+1. Poll STATUS_REG bit 0 == 0   (not busy)
+2. If input data:
+   - Write DATA_LENGTH_REG = number_of_bytes
+   - Write data to DATA_0_REG..DATA_N_REG
+   Else: DATA_LENGTH_REG = 0
+3. Write COMMAND_REG with command ID
+4. Poll STATUS_REG bit 0 == 0   (command complete)
+5. Read DATA_LENGTH_REG to get response length
+6. Read DATA_0_REG..DATA_N_REG for response
 ```
 
-### IDs de comando (del SDK)
+### Command IDs
 
-| ID | Macro | Descripción |
+| ID | Macro | Description |
 |---|---|---|
-| `0x0200` | `LEP_CID_SYS_PING` | Ping (dispositivo presente) |
-| `0x0204` | `LEP_CID_SYS_CAM_STATUS` | Estado de la cámara |
-| `0x0208` | `LEP_CID_SYS_FLIR_SERIAL_NUMBER` | Número serial FLIR |
-| `0x020C` | `LEP_CID_SYS_CAM_UPTIME` | Tiempo encendido |
-| `0x0210` | `LEP_CID_SYS_AUX_TEMPERATURE_KELVIN` | Temperatura auxiliar |
-| `0x0214` | `LEP_CID_SYS_FPA_TEMPERATURE_KELVIN` | Temperatura del FPA (×100 K) |
-| `0x0218` | `LEP_CID_SYS_TELEMETRY_ENABLE_STATE` | Activar telemetría en frame |
-| `0x022C` | `LEP_CID_SYS_SCENE_STATISTICS` | Estadísticas de la escena |
-| `0x023C` | `LEP_CID_SYS_FFC_SHUTTER_MODE_OBJ` | Configurar modo de shutter FFC |
-| `0x0242` | `FLR_CID_SYS_RUN_FFC` | **Ejecutar FFC ahora** |
-| `0x0804` | `LEP_CID_OEM_REBOOT` | **Reiniciar el módulo** |
+| `0x0200` | `LEP_CID_SYS_PING` | Ping (device present) |
+| `0x0204` | `LEP_CID_SYS_CAM_STATUS` | Camera status |
+| `0x0208` | `LEP_CID_SYS_FLIR_SERIAL_NUMBER` | FLIR serial number |
+| `0x020C` | `LEP_CID_SYS_CAM_UPTIME` | Uptime |
+| `0x0210` | `LEP_CID_SYS_AUX_TEMPERATURE_KELVIN` | Auxiliary temperature |
+| `0x0214` | `LEP_CID_SYS_FPA_TEMPERATURE_KELVIN` | FPA temperature (×100 K) |
+| `0x0218` | `LEP_CID_SYS_TELEMETRY_ENABLE_STATE` | Enable frame telemetry |
+| `0x022C` | `LEP_CID_SYS_SCENE_STATISTICS` | Scene statistics |
+| `0x023C` | `LEP_CID_SYS_FFC_SHUTTER_MODE_OBJ` | FFC shutter mode config |
+| `0x0242` | `FLR_CID_SYS_RUN_FFC` | **Run FFC now** |
+| `0x0804` | `LEP_CID_OEM_REBOOT` | **Reboot module** |
 
-### Comandos desde el SDK (`LEPTON_SYS.h`, `LEPTON_OEM.h`)
+## 3. Color Palettes
 
-```c
-#define LEP_SYS_MODULE_BASE               0x0200
-#define LEP_CID_SYS_PING                  (0x0200)
-#define LEP_CID_SYS_FPA_TEMPERATURE_KELVIN (0x0214)
-#define FLR_CID_SYS_RUN_FFC               (0x0242)
-
-#define LEP_OEM_MODULE_BASE               0x0800
-#define LEP_CID_OEM_REBOOT                (0x0804)
-```
-
-## 3. Paletas de Color
-
-Tres paletas definidas en `Palettes.cpp`, cada una con 256 entradas
-RGB (3 enteros por entrada = 768 valores):
+Three palettes defined in `Palettes.cpp`, each with 256 RGB entries (768 integers):
 
 ### `colormap_grayscale`
-Gradiente lineal: blanco (entrada 0) → negro (entrada 255).
-```
-entrada 0:  (255, 255, 255)
-entrada 1:  (253, 253, 253)
-...
-entrada 255: (0, 0, 0)
-```
-Terminador: `-1`
+Linear gradient: white (entry 0) → black (entry 255).
 
 ### `colormap_ironblack` (default)
 ```
-entradas 0-127:   Blanco → Negro (escala de grises descendente)
-entradas 128-159: Negro → Rojo oscuro
-entradas 160-191: Rojo → Naranja
-entradas 192-223: Naranja → Amarillo
-entradas 224-255: Amarillo → Amarillo brillante/blanco
+entries 0-127:   White → Black (descending greyscale)
+entries 128-159: Black → Dark red
+entries 160-191: Red → Orange
+entries 192-223: Orange → Yellow
+entries 224-255: Yellow → Bright yellow/white
 ```
 
 ### `colormap_rainbow`
 ```
-entradas 0-42:    Azul oscuro → Azul
-entradas 43-85:   Azul → Cian
-entradas 86-128:  Cian → Verde
-entradas 129-170: Verde → Amarillo
-entradas 171-213: Amarillo → Naranja
-entradas 214-255: Naranja → Rojo
+entries 0-42:    Dark blue → Blue
+entries 43-85:   Blue → Cyan
+entries 86-128:  Cyan → Green
+entries 129-170: Green → Yellow
+entries 171-213: Yellow → Orange
+entries 214-255: Orange → Red
 ```
 
-### Mapeo píxel → color
+### Pixel-to-color mapping
 
-Del `mainwindow.cpp` líneas 51-57:
+From `mainwindow.cpp` lines 51-57:
 ```cpp
 diff = max_value - min_value + 1;
 scaledValue = 256 * (baseValue - minValue) / diff;
 color = colormap[scaledValue];  // RGB triplet
 ```
 
-Se normaliza el rango raw [min, max] a [0, 255] y se indexa la paleta.
+The raw range [min, max] is normalized to [0, 255] and used as a palette index.
 
-## 4. Radiometría (temperatura)
+## 4. Radiometry
 
-### Especificación Lepton 2.5
+### Lepton 2.5 specification
 
-| Parámetro | Valor |
+| Parameter | Value |
 |---|---|
-| Resolución ADC | 14-bit (en contenedor 16-bit) |
-| Frame rate | 8.6 Hz (comercial) / 27 Hz (interna) |
-| Precisión radiométrica | ±5°C (high gain @ 25°C ambiente) |
-| Rango (high gain) | -10°C a +140°C |
-| Rango (low gain) | hasta +400°C |
+| ADC resolution | 14-bit (in 16-bit container) |
+| Frame rate | 8.6 Hz (commercial) / 27 Hz (internal) |
+| Radiometric accuracy | ±5°C (high gain @ 25°C ambient) |
+| Range (high gain) | -10°C to +140°C |
+| Range (low gain) | up to +400°C |
 
-### TLinear (modo radiométrico)
+### TLinear mode
 
-Cuando **TLinear** está habilitado (default en Lepton 2.5 y 3.5):
-- El valor de píxel representa temperatura en centikelvin (K × 100)
-- Los valores típicos del código C: `rangeMin=30000` (26.85°C), `rangeMax=32000` (46.85°C)
+When **TLinear** is enabled (default on Lepton 2.5 and 3.5):
+- Pixel value represents temperature in centikelvin (K × 100)
+- Typical C reference values: `rangeMin=30000` (26.85°C), `rangeMax=32000` (46.85°C)
 
-**Fórmula de conversión:**
+**Conversion formula:**
 ```python
-T_kelvin = raw_pixel / 100.0
+T_kelvin  = raw_pixel / 100.0
 T_celsius = T_kelvin - 273.15
 ```
 
-### Precisión según temperatura (datasheet)
+### Emissivity correction
 
-| Temp. ambiente | Temp. escena 10°C | 50°C | 100°C |
+Real materials have emissivity ε < 1.0. The correction accounts for both material emissivity and reflected background radiation:
+
+```python
+T_real = (T_measured - (1 - ε) * T_background) / ε
+```
+
+This is a software correction only. For systems with an optical window, characterization of window transmission (τ_Win) and window temperature (T_Win) is also required (see FLIR doc 102-PS245-76).
+
+### Accuracy vs. temperature (datasheet)
+
+| Ambient | Scene 10°C | 50°C | 100°C |
 |---|---|---|---|
 | 0°C | ±5°C | ±5°C | ±5°C |
 | 30°C | ±5°C | ±3°C | ±4°C |
 | 60°C | ±6°C | ±3°C | ±3°C |
 
-## 5. Conexión de pines (Raspberry Pi)
+## 5. Pin mapping (Raspberry Pi)
 
-Basado en `SPI.cpp`, `LeptonThread.cpp` y `leptsci.c`:
+Based on `SPI.cpp`, `LeptonThread.cpp`, and `leptsci.c`:
 
-| Señal Lepton | Pin RPi | Conexión |
+| Lepton signal | RPi pin | Notes |
 |---|---|---|
-| CS (Chip Select) | GPIO8 (CE0) → `/dev/spidev0.0` | O GPIO7 (CE1) → `0.1` |
-| MOSI | GPIO10 (MOSI) | No usado (Lepton es output-only) |
-| MISO | GPIO9 (MISO) | **Obligatorio** — datos de video |
-| SCLK | GPIO11 (SCLK) | Reloj SPI |
+| CS (Chip Select) | GPIO8 (CE0) → `/dev/spidev0.0` | Or GPIO7 (CE1) → `0.1` |
+| MOSI | GPIO10 (MOSI) | Unused by Lepton (output-only device) |
+| MISO | GPIO9 (MISO) | **Required** — video data |
+| SCLK | GPIO11 (SCLK) | SPI clock |
 | SDA (I2C) | GPIO2 (SDA) | `/dev/i2c-1` |
 | SCL (I2C) | GPIO3 (SCL) | `/dev/i2c-1` |
-| VIN | 3.3V o 5V | Breakout regula internamente |
-| GND | GND | Masa común |
+| VIN | 3.3 V | Breakout regulates internally |
+| GND | GND | Common ground |
 
-> **Importante**: Habilitar SPI e I2C con `raspi-config` antes de usar.
+SPI and I2C must be enabled via `raspi-config` before use.
 
-## 6. Estado del ecosistema Python existente
+## 6. Existing Python ecosystem
 
 ### PyLepton (`groupgets/pylepton`)
-- **Obsoleto**: README dice explícitamente *"this software no longer works"*
-- Solo captura SPI, sin control I2C
-- Asume datos de 12-bit (no 14-bit radiométrico)
-- Dependencias: `cv2` + `numpy`
-- Solo Lepton 2.x (80×60), no maneja los 4 segmentos de la 3.x
-- Sin mantenimiento; se rompe en kernels recientes de Raspbian
+- **Deprecated**: README states *"this software no longer works"*
+- SPI capture only, no I2C control
+- Assumes 12-bit data (not 14-bit radiometric)
+- Lepton 2.x only (80×60); does not handle 4-segment Lepton 3.x
+- Breaks on recent Raspbian kernels
 
-#### Técnica reutilizable: lectura por lotes con `ioctl` crudo
+#### Reusable technique: batch reads with raw `ioctl`
 
-`pylepton` **no usa el módulo `spidev`**. Habla directo con el kernel: arma a
-mano el struct `spi_ioc_transfer` de Linux y lanza el comando `SPI_IOC_MESSAGE`
-con `fcntl.ioctl`. Esto le permite leer **varias filas VoSPI en una sola
-syscall**, en lugar de una llamada `xfer2()` por paquete.
+`pylepton` bypasses `spidev` and talks directly to the kernel: it builds the `spi_ioc_transfer` struct manually and issues `SPI_IOC_MESSAGE` via `fcntl.ioctl`. This reads **multiple VoSPI rows in a single syscall** instead of one `xfer2()` per packet.
 
-**Qué es.** El kernel acepta un *array* de descriptores `spi_ioc_transfer` en
-una única `ioctl`. Cada descriptor es una transferencia (una fila de 164 bytes).
-Enviando N descriptores juntos, las 60 filas de un frame se leen en ~3 syscalls
-en vez de 60.
+The kernel accepts an array of `spi_ioc_transfer` descriptors in a single `ioctl`. Sending N descriptors together reads all 60 rows in ~3 syscalls instead of 60.
 
-**Por qué importa.** Nuestra implementación (`lepton/spi.py`) hace un
-`self._spi.xfer2(tx)` por paquete → **60 syscalls por frame**. A 9 FPS son ~540
-syscalls/s. Funciona bien, pero si alguna vez la captura va corta de CPU o
-pierde sincronía por latencia entre paquetes, el batching reduce ese overhead.
-
-**El límite de 24.** El `bufsiz` por defecto de spidev es 4096 bytes, y
-`4096 / 164 ≈ 24` → solo caben 24 filas por `ioctl`. Por eso `pylepton` parte el
-frame en bloques de 24. Se puede subir a 59 filas/ioctl ampliando el buffer:
+Default `spidev` buffer size is 4096 bytes: `4096 / 164 ≈ 24` rows per `ioctl`. To increase:
 
 ```bash
-sudo chmod 666 /sys/module/spidev/parameters/bufsiz
-echo 65536 > /sys/module/spidev/parameters/bufsiz   # 65536/164 = 399 -> tope util 59
+echo 65536 > /sys/module/spidev/parameters/bufsiz
 ```
 
-**Cómo se hace (esqueleto, adaptado de `Lepton.py`):**
+This technique is documented as a reference. The current `spi.py` uses `xfer2()` per packet (60 syscalls/frame at ~9 FPS = ~540 syscalls/s), which is sufficient in practice. Batching is an option if CPU overhead or sync loss becomes a problem.
 
-```python
-import struct, numpy as np
-from fcntl import ioctl
+## 7. Key reference files
 
-SPI_IOC_MAGIC = ord("k")
-
-# struct spi_ioc_transfer = "=QQIIHBBI"
-#   tx_buf(u64) rx_buf(u64) len(u32) speed_hz(u32)
-#   delay_usecs(u16) bits_per_word(u8) cs_change(u8) pad(u32)
-xmit = struct.Struct("=QQIIHBBI")
-
-# 1) Buffers contiguos: uno de TX (ceros) y uno de RX para todo el frame
-PACKET = 164          # 4 header + 80 px*2
-ROWS   = 60
-txbuf  = np.zeros(PACKET, dtype=np.uint8)
-rxbuf  = np.zeros((ROWS, PACKET), dtype=np.uint8)
-
-# 2) Un descriptor por fila, todos apuntando al mismo txbuf y a su tramo de rxbuf
-msgs = bytearray()
-for i in range(ROWS):
-    msgs += xmit.pack(
-        txbuf.ctypes.data,                 # tx_buf  (mismo buffer de ceros)
-        rxbuf.ctypes.data + PACKET * i,    # rx_buf  (fila i)
-        PACKET,                            # len
-        16000000,                          # speed_hz (<= 20 MHz)
-        0, 8, 1, 0)                        # delay, bits, cs_change=1, pad
-
-# 3) Enviar en bloques de COUNT filas (24 con bufsiz por defecto)
-COUNT = 24
-sent = 0
-while sent < ROWS:
-    n = min(COUNT, ROWS - sent)
-    # nr=0, dir=write; el "size" del ioctl es el tamaño total del bloque
-    iow = (1 << 30) | (SPI_IOC_MAGIC << 8) | (xmit.size * n) << 16
-    ioctl(handle, iow, msgs[xmit.size*sent : xmit.size*(sent+n)], True)
-    sent += n
-# rxbuf ya contiene las 60 filas; parsear igual que _parse_frame()
-```
-
-(El cálculo de `iow` lo hace de forma legible `ioctl_numbers._IOW(SPI_IOC_MAGIC,
-0, size)` en el repo original; aquí va expandido para que se entienda.)
-
-**Cuándo adoptarlo.** Solo si se mide un problema real de rendimiento o de
-sincronía con `xfer2` por paquete. Mientras tanto, `spidev` es más simple,
-mantenido y portable — esta nota queda solo como referencia.
-
-### Lecciones aprendidas para la implementación Python
-1. El **SDK de FLIR no es necesario** — el CCI es implementable con smbus2
-2. **SPI mode 0** es el más usado por los drivers de FLIR
-3. La detección de paquetes no-listos (0xF en header **byte[0] bits 0-3**)
-   es **crítica** para captura robusta
-4. Frame rate efectivo: **~9 FPS** (descartando duplicados internos ~27 FPS)
-5. Las paletas de color vienen como arrays C de 768 enteros — portables a Python
-
-## 7. Archivos clave del repositorio
-
-| Archivo | Ruta | Líneas útiles |
+| File | Path | Relevant lines |
 |---|---|---|
-| Driver SPI principal | `software/flirpi/leptsci.c` | 47-104 (captura completa) |
-| Captura Qt (sin SDK) | `software/raspberrypi_qt/LeptonThread.cpp` | 13-162 (loop robusto) |
-| Captura Qt (con SDK) | `software/raspberrypi_video/LeptonThread.cpp` | 107-274 (soporte 3.x) |
-| Paletas de color | `software/raspberrypi_video/Palettes.cpp` | 1-25 (3 paletas) |
+| Main SPI driver | `software/flirpi/leptsci.c` | 47-104 (full capture) |
+| Qt capture (no SDK) | `software/raspberrypi_qt/LeptonThread.cpp` | 13-162 (robust loop) |
+| Qt capture (with SDK) | `software/raspberrypi_video/LeptonThread.cpp` | 107-274 (Lepton 3.x support) |
+| Color palettes | `software/raspberrypi_video/Palettes.cpp` | 1-25 (3 palettes) |
 | I2C via SDK | `software/raspberrypi_video/Lepton_I2C.cpp` | 1-32 (FFC, reboot) |
-| Registros I2C | `software/beagleboneblack_video/leptonSDKEmb32PUB/LEPTON_I2C_Reg.h` | 79-131 (addresses) |
+| I2C registers | `software/beagleboneblack_video/leptonSDKEmb32PUB/LEPTON_I2C_Reg.h` | 79-131 (addresses) |
 | Framebuffer viewer | `software/flirpi/fblept.c` | 30-104 (colormap + render) |
