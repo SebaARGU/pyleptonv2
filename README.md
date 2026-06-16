@@ -55,6 +55,30 @@ python3 lepton_viewer.py --capture test
 
 **Controls (live view):** `s` save, `f` FFC, `c` colormap, `t` temp overlay, `q` quit.
 
+## Emissivity correction
+
+By default the Lepton assumes emissivity = 1.0 (perfect blackbody). Real materials emit less radiation, which biases absolute temperature readings. Pass `--emissivity` and `--background-temp` to compensate:
+
+```bash
+python3 lepton_viewer.py --emissivity 0.98 --background-temp 22 --temp
+```
+
+| Material        | Emissivity |
+|-----------------|------------|
+| Human skin      | 0.98       |
+| Plastic         | 0.95       |
+| Wood            | 0.94       |
+| Glass           | 0.92       |
+| Concrete        | 0.95       |
+| Water           | 0.96       |
+| Oxidized metal  | 0.70       |
+| Polished metal  | 0.10       |
+| Aluminium       | 0.05       |
+
+Formula applied: `T_real = (T_measured − (1 − ε) × T_background) / ε`
+
+Note: sensor accuracy is ±5°C — emissivity correction improves systematic bias but does not increase absolute accuracy beyond the hardware limit.
+
 ## Notes
 
 - Assumes TLinear (radiometric) mode — raw values are centikelvin.

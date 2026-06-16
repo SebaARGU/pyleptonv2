@@ -1,5 +1,19 @@
 import numpy as np
 
+# Emisividades comunes (adimensional, 0-1)
+EMISSIVITY = {
+    "piel":           0.98,
+    "madera":         0.94,
+    "plastico":       0.95,
+    "vidrio":         0.92,
+    "concreto":       0.95,
+    "tela":           0.95,
+    "agua":           0.96,
+    "metal_oxidado":  0.70,
+    "metal_pulido":   0.10,
+    "aluminio":       0.05,
+}
+
 
 def raw_to_celsius(raw_data):
     if raw_data.dtype != np.uint16:
@@ -9,6 +23,23 @@ def raw_to_celsius(raw_data):
     celsius = kelvin - 273.15
 
     return celsius
+
+
+def apply_emissivity(celsius, emissivity=1.0, background_temp=20.0):
+    """Corrige temperatura por emisividad del material y temperatura de fondo reflejada.
+
+    T_real = (T_medida - (1 - e) * T_fondo) / e
+
+    Args:
+        celsius: array de temperaturas medidas en °C
+        emissivity: emisividad del material (0-1, default 1.0 = sin corrección)
+        background_temp: temperatura ambiental reflejada en °C (default 20.0)
+    """
+    if not (0.01 <= emissivity <= 1.0):
+        raise ValueError(f"Emisividad debe estar entre 0.01 y 1.0, recibido: {emissivity}")
+    if emissivity == 1.0:
+        return celsius
+    return (celsius - (1.0 - emissivity) * background_temp) / emissivity
 
 
 def get_frame_temperatures(celsius):

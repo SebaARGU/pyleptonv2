@@ -28,7 +28,7 @@ if not _check_devices():
 # ── 2. Importar drivers ───────────────────────────────────────────────────────
 
 from lepton.spi import LeptonSPI
-from lepton.radiometry import raw_to_celsius, get_frame_temperatures
+from lepton.radiometry import raw_to_celsius, apply_emissivity, get_frame_temperatures, EMISSIVITY
 
 try:
     from lepton.i2c import LeptonI2C
@@ -40,6 +40,11 @@ except ImportError:
 
 # Velocidad conservadora para el primer arranque (ARRANQUE_SEGURO.md §4.1)
 SPI_SPEED_HZ = 10_000_000  # 10 MHz; subir a 16 MHz si la imagen es estable
+
+# Correccion por emisividad: ajustar segun el material observado.
+# Ver EMISSIVITY en radiometry.py para valores comunes (piel=0.98, etc.)
+EMISSIVITY_VALUE  = EMISSIVITY["piel"]   # 0.98
+BACKGROUND_TEMP_C = 20.0                 # temperatura ambiental en °C
 
 print(f"Abriendo cámara en {SPI_DEVICE} a {SPI_SPEED_HZ // 1_000_000} MHz...")
 
@@ -59,8 +64,8 @@ with LeptonSPI(SPI_DEVICE, speed_hz=SPI_SPEED_HZ) as cam:
     print("Capturando frame...")
     frame_raw = cam.get_frame()   # ndarray (60, 80) uint16
 
-    # ── 3c. Convertir a °C y mostrar estadísticas ────────────────────────────
-    celsius = raw_to_celsius(frame_raw)
+    # ── 3c. Convertir a °C, aplicar corrección de emisividad y mostrar estadísticas
+    celsius = apply_emissivity(raw_to_celsius(frame_raw), EMISSIVITY_VALUE, BACKGROUND_TEMP_C)
     stats   = get_frame_temperatures(celsius)
 
     min_pos = tuple(int(x) for x in stats['min_pos'])

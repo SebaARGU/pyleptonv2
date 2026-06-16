@@ -21,7 +21,9 @@ from lepton.radiometry import (
     normalize_frame,
     auto_range,
     raw_to_celsius,
+    apply_emissivity,
     get_frame_temperatures,
+    EMISSIVITY,
 )
 
 try:
@@ -75,6 +77,15 @@ def parse_args():
     parser.add_argument(
         "-o", "--output-dir", default=".",
         help="Directory for saved snapshots (default: current dir)"
+    )
+    parser.add_argument(
+        "--emissivity", type=float, default=1.0,
+        help="Emissivity of the scene material 0.01-1.0 (default: 1.0). "
+             f"Presets: {', '.join(f'{k}={v}' for k, v in EMISSIVITY.items())}"
+    )
+    parser.add_argument(
+        "--background-temp", type=float, default=20.0,
+        help="Reflected background temperature in Celsius (default: 20.0)"
     )
     return parser.parse_args()
 
@@ -151,6 +162,11 @@ def run_live_view(args):
     cmap_cycle = [COLORMAP_GRAYSCALE, COLORMAP_IRONBLACK, COLORMAP_RAINBOW]
     cmap_idx = cmap_cycle.index(cmap_id)
 
+    emissivity = args.emissivity
+    background_temp = args.background_temp
+    if emissivity != 1.0:
+        print(f"[Radiometry] Emissivity: {emissivity}, Background: {background_temp} C")
+
     print(f"[SPI] Opening {args.device} (mode {args.spi_mode}, {args.spi_speed} Hz)")
     print("[Controls]  s:snapshot  f:FFC  c:colormap  t:temp  r:auto-range  q:quit")
 
@@ -178,7 +194,7 @@ def run_live_view(args):
 
             celsius = None
             if show_temp:
-                celsius = raw_to_celsius(raw)
+                celsius = apply_emissivity(raw_to_celsius(raw), emissivity, background_temp)
 
             display = cv2.resize(rgb, (disp_w, disp_h), interpolation=cv2.INTER_NEAREST)
 
@@ -241,7 +257,7 @@ def run_capture(args):
     prefix = args.capture if args.capture else "snapshot"
     save_snapshot(raw, cmap, args.output_dir, prefix)
 
-    celsius = raw_to_celsius(raw)
+    celsius = apply_emissivity(raw_to_celsius(raw), args.emissivity, args.background_temp)
     temps = get_frame_temperatures(celsius)
     print(f"  Min: {temps['min']:.1f}C  Max: {temps['max']:.1f}C  Avg: {temps['avg']:.1f}C")
 
