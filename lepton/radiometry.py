@@ -1,17 +1,17 @@
 import numpy as np
 
-# Emisividades comunes (adimensional, 0-1)
+# Common emissivity values (dimensionless, 0-1)
 EMISSIVITY = {
-    "piel":           0.98,
-    "madera":         0.94,
-    "plastico":       0.95,
-    "vidrio":         0.92,
-    "concreto":       0.95,
-    "tela":           0.95,
-    "agua":           0.96,
-    "metal_oxidado":  0.70,
-    "metal_pulido":   0.10,
-    "aluminio":       0.05,
+    "skin":            0.98,
+    "wood":            0.94,
+    "plastic":         0.95,
+    "glass":           0.92,
+    "concrete":        0.95,
+    "fabric":          0.95,
+    "water":           0.96,
+    "oxidized_metal":  0.70,
+    "polished_metal":  0.10,
+    "aluminium":       0.05,
 }
 
 
