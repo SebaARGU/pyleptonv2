@@ -118,22 +118,40 @@ def _put_text_shadowed(img, text, pos, scale, color, thickness=1):
                 cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
 
 
-def draw_overlay(display, celsius_frame, show_temp):
+# Colores en orden BGR (lo que espera cv2 / imshow)
+COLOR_COLD = (255, 200, 100)   # azul claro -> marcador MIN
+COLOR_HOT  = (60, 60, 255)     # rojo       -> marcador MAX
+COLOR_AVG  = (80, 220, 80)     # verde      -> promedio
+COLOR_WHITE = (255, 255, 255)
+
+
+def center_box_temp(celsius, box=3):
+    """Promedio de una caja de box×box pixeles centrada en el frame original.
+
+    Replica el spot meter de las camaras FLIR: mas estable que un solo pixel.
+    """
+    h, w = celsius.shape
+    cr, cc = h // 2, w // 2
+    half = box // 2
+    region = celsius[cr - half:cr + half + 1, cc - half:cc + half + 1]
+    return float(region.mean())
+
+
+def draw_overlay(display, celsius_frame, show_temp, center_temp):
     temps = get_frame_temperatures(celsius_frame)
     h, w = display.shape[:2]
 
-    # ── Cruceta central siempre visible ─────────────────────────────────────
+    # ── Spot meter central (caja 3x3) siempre visible ────────────────────────
     cx, cy = w // 2, h // 2
     arm = 14
-    cv2.line(display, (cx - arm, cy), (cx + arm, cy), (255, 255, 255), 1, cv2.LINE_AA)
-    cv2.line(display, (cx, cy - arm), (cx, cy + arm), (255, 255, 255), 1, cv2.LINE_AA)
-    cv2.circle(display, (cx, cy), 4, (255, 255, 255), 1, cv2.LINE_AA)
+    box_half = 3 * max(w // FRAME_COLS, 1)   # tamaño de la caja escalado al display
+    cv2.rectangle(display, (cx - box_half, cy - box_half),
+                  (cx + box_half, cy + box_half), COLOR_WHITE, 1, cv2.LINE_AA)
+    cv2.line(display, (cx - arm, cy), (cx + arm, cy), COLOR_WHITE, 1, cv2.LINE_AA)
+    cv2.line(display, (cx, cy - arm), (cx, cy + arm), COLOR_WHITE, 1, cv2.LINE_AA)
 
-    # Temperatura del centro
-    center_row = int(FRAME_ROWS / 2)
-    center_col = int(FRAME_COLS / 2)
-    center_temp = celsius_frame[center_row, center_col]
-    _put_text_shadowed(display, f"{center_temp:.1f}C", (cx + 10, cy - 8), 0.65, (255, 255, 255))
+    _put_text_shadowed(display, f"{center_temp:.1f}C", (cx + box_half + 6, cy - 8),
+                       0.65, COLOR_WHITE)
 
     if not show_temp:
         return
@@ -144,23 +162,23 @@ def draw_overlay(display, celsius_frame, show_temp):
     cv2.rectangle(overlay, (0, 0), (w, panel_h), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.45, display, 0.55, 0, display)
 
-    _put_text_shadowed(display, f"Min  {temps['min']:.1f} C", (12, 24), 0.7, (100, 200, 255))
-    _put_text_shadowed(display, f"Max  {temps['max']:.1f} C", (12, 46), 0.7, (60,  60,  255))
-    _put_text_shadowed(display, f"Avg  {temps['avg']:.1f} C", (12, 68), 0.7, (80, 220,  80))
+    _put_text_shadowed(display, f"Min  {temps['min']:.1f} C", (12, 24), 0.7, COLOR_COLD)
+    _put_text_shadowed(display, f"Max  {temps['max']:.1f} C", (12, 46), 0.7, COLOR_HOT)
+    _put_text_shadowed(display, f"Avg  {temps['avg']:.1f} C", (12, 68), 0.7, COLOR_AVG)
 
     # ── Marcador MIN (azul claro) con etiqueta ───────────────────────────────
     if temps["min_pos"]:
         my = int(temps["min_pos"][0] * h / FRAME_ROWS)
         mx = int(temps["min_pos"][1] * w / FRAME_COLS)
-        cv2.drawMarker(display, (mx, my), (100, 200, 255), cv2.MARKER_CROSS, 16, 2)
-        _put_text_shadowed(display, f"{temps['min']:.1f}C", (mx + 8, my - 6), 0.55, (100, 200, 255))
+        cv2.drawMarker(display, (mx, my), COLOR_COLD, cv2.MARKER_CROSS, 16, 2)
+        _put_text_shadowed(display, f"{temps['min']:.1f}C", (mx + 8, my - 6), 0.55, COLOR_COLD)
 
     # ── Marcador MAX (rojo) con etiqueta ────────────────────────────────────
     if temps["max_pos"]:
         my = int(temps["max_pos"][0] * h / FRAME_ROWS)
         mx = int(temps["max_pos"][1] * w / FRAME_COLS)
-        cv2.drawMarker(display, (mx, my), (60, 60, 255), cv2.MARKER_CROSS, 16, 2)
-        _put_text_shadowed(display, f"{temps['max']:.1f}C", (mx + 8, my - 6), 0.55, (60, 60, 255))
+        cv2.drawMarker(display, (mx, my), COLOR_HOT, cv2.MARKER_CROSS, 16, 2)
+        _put_text_shadowed(display, f"{temps['max']:.1f}C", (mx + 8, my - 6), 0.55, COLOR_HOT)
 
 
 def run_live_view(args):
@@ -232,12 +250,14 @@ def run_live_view(args):
             vmin, vmax = auto_range(raw)
             norm = normalize_frame(raw, vmin, vmax)
             rgb = apply_colormap(norm, cmap_id)
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)   # imshow espera BGR
 
             celsius = apply_emissivity(raw_to_celsius(raw), emissivity, background_temp)
+            center_temp = center_box_temp(celsius)
 
-            display = cv2.resize(rgb, (disp_w, disp_h), interpolation=cv2.INTER_NEAREST)
+            display = cv2.resize(bgr, (disp_w, disp_h), interpolation=cv2.INTER_NEAREST)
             celsius_big = cv2.resize(celsius, (disp_w, disp_h), interpolation=cv2.INTER_NEAREST)
-            draw_overlay(display, celsius_big, show_temp)
+            draw_overlay(display, celsius_big, show_temp, center_temp)
 
             info = f"{colormap_name(cmap_id)}  |  {fps_str}"
             _put_text_shadowed(display, info, (8, disp_h - 10), 0.5, (200, 200, 200))
