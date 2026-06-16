@@ -67,8 +67,8 @@ def parse_args():
         help="Colormap for live view (default: ironblack)"
     )
     parser.add_argument(
-        "--scale", type=int, default=4,
-        help="Display scale factor (default: 4 -> 320x240)"
+        "--scale", type=int, default=6,
+        help="Display scale factor (default: 6 -> 480x360)"
     )
     parser.add_argument(
         "--temp", action="store_true",
@@ -110,33 +110,57 @@ def save_snapshot(raw_data, colormap_id, output_dir, prefix):
     return raw_path, jpg_path
 
 
-def draw_temperature_overlay(display, celsius_frame, raw_data):
+def _put_text_shadowed(img, text, pos, scale, color, thickness=1):
+    x, y = pos
+    cv2.putText(img, text, (x + 1, y + 1),
+                cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+    cv2.putText(img, text, (x, y),
+                cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+
+
+def draw_overlay(display, celsius_frame, show_temp):
     temps = get_frame_temperatures(celsius_frame)
     h, w = display.shape[:2]
 
+    # ── Cruceta central siempre visible ─────────────────────────────────────
+    cx, cy = w // 2, h // 2
+    arm = 14
+    cv2.line(display, (cx - arm, cy), (cx + arm, cy), (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.line(display, (cx, cy - arm), (cx, cy + arm), (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.circle(display, (cx, cy), 4, (255, 255, 255), 1, cv2.LINE_AA)
+
+    # Temperatura del centro
+    center_row = int(FRAME_ROWS / 2)
+    center_col = int(FRAME_COLS / 2)
+    center_temp = celsius_frame[center_row, center_col]
+    _put_text_shadowed(display, f"{center_temp:.1f}C", (cx + 10, cy - 8), 0.65, (255, 255, 255))
+
+    if not show_temp:
+        return
+
+    # ── Panel superior: Min / Max / Avg ─────────────────────────────────────
+    panel_h = 68
     overlay = display.copy()
+    cv2.rectangle(overlay, (0, 0), (w, panel_h), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.45, display, 0.55, 0, display)
 
-    label = (
-        f"Min: {temps['min']:.1f}C   "
-        f"Max: {temps['max']:.1f}C   "
-        f"Avg: {temps['avg']:.1f}C"
-    )
-    cv2.putText(overlay, label, (8, 24),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+    _put_text_shadowed(display, f"Min  {temps['min']:.1f} C", (12, 24), 0.7, (100, 200, 255))
+    _put_text_shadowed(display, f"Max  {temps['max']:.1f} C", (12, 46), 0.7, (60,  60,  255))
+    _put_text_shadowed(display, f"Avg  {temps['avg']:.1f} C", (12, 68), 0.7, (80, 220,  80))
 
+    # ── Marcador MIN (azul claro) con etiqueta ───────────────────────────────
     if temps["min_pos"]:
         my = int(temps["min_pos"][0] * h / FRAME_ROWS)
         mx = int(temps["min_pos"][1] * w / FRAME_COLS)
-        cv2.drawMarker(overlay, (mx, my), (255, 255, 0),
-                       cv2.MARKER_CROSS, 12, 2)
+        cv2.drawMarker(display, (mx, my), (100, 200, 255), cv2.MARKER_CROSS, 16, 2)
+        _put_text_shadowed(display, f"{temps['min']:.1f}C", (mx + 8, my - 6), 0.55, (100, 200, 255))
 
+    # ── Marcador MAX (rojo) con etiqueta ────────────────────────────────────
     if temps["max_pos"]:
         my = int(temps["max_pos"][0] * h / FRAME_ROWS)
         mx = int(temps["max_pos"][1] * w / FRAME_COLS)
-        cv2.drawMarker(overlay, (mx, my), (0, 0, 255),
-                       cv2.MARKER_CROSS, 12, 2)
-
-    cv2.addWeighted(overlay, 0.7, display, 0.3, 0, display)
+        cv2.drawMarker(display, (mx, my), (60, 60, 255), cv2.MARKER_CROSS, 16, 2)
+        _put_text_shadowed(display, f"{temps['max']:.1f}C", (mx + 8, my - 6), 0.55, (60, 60, 255))
 
 
 def run_live_view(args):
@@ -192,23 +216,14 @@ def run_live_view(args):
             norm = normalize_frame(raw, vmin, vmax)
             rgb = apply_colormap(norm, cmap_id)
 
-            celsius = None
-            if show_temp:
-                celsius = apply_emissivity(raw_to_celsius(raw), emissivity, background_temp)
+            celsius = apply_emissivity(raw_to_celsius(raw), emissivity, background_temp)
 
             display = cv2.resize(rgb, (disp_w, disp_h), interpolation=cv2.INTER_NEAREST)
+            celsius_big = cv2.resize(celsius, (disp_w, disp_h), interpolation=cv2.INTER_NEAREST)
+            draw_overlay(display, celsius_big, show_temp)
 
-            if celsius is not None:
-                celsius_big = cv2.resize(celsius, (disp_w, disp_h),
-                                          interpolation=cv2.INTER_NEAREST)
-                draw_temperature_overlay(display, celsius_big, raw)
-
-            info = (
-                f"{colormap_name(cmap_id)} | "
-                f"Range: {vmin}-{vmax} | {fps_str}"
-            )
-            cv2.putText(display, info, (8, disp_h - 12),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+            info = f"{colormap_name(cmap_id)}  |  {fps_str}"
+            _put_text_shadowed(display, info, (8, disp_h - 10), 0.5, (200, 200, 200))
 
             cv2.imshow("Lepton Thermal Camera", display)
             key = cv2.waitKey(1) & 0xFF
