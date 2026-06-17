@@ -60,6 +60,18 @@ def get_frame_temperatures(celsius):
     }
 
 
+def center_box_temp(celsius, box=3):
+    """Mean of a box x box region at the center of the frame.
+
+    Mimics the spot meter of FLIR cameras: more stable than a single pixel.
+    """
+    h, w = celsius.shape
+    cr, cc = h // 2, w // 2
+    half = box // 2
+    region = celsius[cr - half:cr + half + 1, cc - half:cc + half + 1]
+    return float(region.mean())
+
+
 def auto_range(raw_data, margin=500):
     valid = raw_data[raw_data > 0]
     if valid.size == 0:

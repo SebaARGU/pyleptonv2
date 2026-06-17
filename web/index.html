@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lepton Thermal Camera</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>FLIR Lepton — Thermal Camera</h1>
+    <span class="badge" id="fps">— FPS</span>
+  </header>
+
+  <main>
+    <section class="video">
+      <img id="stream" src="/stream.mjpg" alt="thermal stream">
+      <div class="readout">
+        <span class="chip cold">Min <b id="r-min">—</b></span>
+        <span class="chip avg">Avg <b id="r-avg">—</b></span>
+        <span class="chip hot">Max <b id="r-max">—</b></span>
+        <span class="chip">FPA <b id="r-fpa">—</b></span>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <h2>Controls</h2>
+
+        <label>Emissivity <span class="val" id="e-val">0.98</span></label>
+        <input type="range" id="emissivity" min="0.05" max="1.0" step="0.01" value="0.98">
+
+        <label for="material">Material preset</label>
+        <select id="material"></select>
+
+        <label>Background temp <span class="val" id="bg-val">20 C</span></label>
+        <input type="range" id="background" min="-10" max="40" step="1" value="20">
+
+        <label for="colormap">Colormap</label>
+        <select id="colormap"></select>
+
+        <button id="ffc">Run FFC (shutter recalibration)</button>
+      </div>
+
+      <div class="card edu">
+        <h2>How emissivity works</h2>
+        <p class="formula">T<sub>real</sub> = (T<sub>meas</sub> − (1−ε)·T<sub>bg</sub>) / ε</p>
+        <div class="compare">
+          <div><span>Center raw (ε=1.0)</span><b id="c-raw">—</b></div>
+          <div><span>Center corrected</span><b id="c-corr" class="corr">—</b></div>
+          <div><span>Difference</span><b id="c-diff">—</b></div>
+        </div>
+        <p class="note">
+          Emissivity (ε) is how efficiently a surface emits infrared compared to a
+          perfect blackbody (ε=1.0). The Lepton assumes ε=1.0, so real materials —
+          which emit less — read low. Lower ε with the slider and watch the corrected
+          center value rise. Sensor accuracy is ±5°C; this is a teaching tool.
+        </p>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -23,8 +23,10 @@ from lepton.radiometry import (
     raw_to_celsius,
     apply_emissivity,
     get_frame_temperatures,
+    center_box_temp,
     EMISSIVITY,
 )
+from lepton.overlay import put_text_shadowed, draw_overlay
 
 try:
     from lepton.i2c import LeptonI2C
@@ -110,75 +112,6 @@ def save_snapshot(raw_data, colormap_id, output_dir, prefix):
     return raw_path, jpg_path
 
 
-def _put_text_shadowed(img, text, pos, scale, color, thickness=1):
-    x, y = pos
-    cv2.putText(img, text, (x + 1, y + 1),
-                cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
-    cv2.putText(img, text, (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
-
-
-# Colores en orden BGR (lo que espera cv2 / imshow)
-COLOR_COLD = (255, 200, 100)   # azul claro -> marcador MIN
-COLOR_HOT  = (60, 60, 255)     # rojo       -> marcador MAX
-COLOR_AVG  = (80, 220, 80)     # verde      -> promedio
-COLOR_WHITE = (255, 255, 255)
-
-
-def center_box_temp(celsius, box=3):
-    """Promedio de una caja de box×box pixeles centrada en el frame original.
-
-    Replica el spot meter de las camaras FLIR: mas estable que un solo pixel.
-    """
-    h, w = celsius.shape
-    cr, cc = h // 2, w // 2
-    half = box // 2
-    region = celsius[cr - half:cr + half + 1, cc - half:cc + half + 1]
-    return float(region.mean())
-
-
-def draw_overlay(display, celsius_frame, show_temp, center_temp):
-    temps = get_frame_temperatures(celsius_frame)
-    h, w = display.shape[:2]
-
-    # ── Spot meter central (caja 3x3) siempre visible ────────────────────────
-    cx, cy = w // 2, h // 2
-    arm = 14
-    box_half = 3 * max(w // FRAME_COLS, 1)   # tamaño de la caja escalado al display
-    cv2.rectangle(display, (cx - box_half, cy - box_half),
-                  (cx + box_half, cy + box_half), COLOR_WHITE, 1, cv2.LINE_AA)
-    cv2.line(display, (cx - arm, cy), (cx + arm, cy), COLOR_WHITE, 1, cv2.LINE_AA)
-    cv2.line(display, (cx, cy - arm), (cx, cy + arm), COLOR_WHITE, 1, cv2.LINE_AA)
-
-    _put_text_shadowed(display, f"{center_temp:.1f}C", (cx + box_half + 6, cy - 8),
-                       0.65, COLOR_WHITE)
-
-    if not show_temp:
-        return
-
-    # ── Panel superior: Min / Max / Avg ─────────────────────────────────────
-    panel_h = 68
-    overlay = display.copy()
-    cv2.rectangle(overlay, (0, 0), (w, panel_h), (0, 0, 0), -1)
-    cv2.addWeighted(overlay, 0.45, display, 0.55, 0, display)
-
-    _put_text_shadowed(display, f"Min  {temps['min']:.1f} C", (12, 24), 0.7, COLOR_COLD)
-    _put_text_shadowed(display, f"Max  {temps['max']:.1f} C", (12, 46), 0.7, COLOR_HOT)
-    _put_text_shadowed(display, f"Avg  {temps['avg']:.1f} C", (12, 68), 0.7, COLOR_AVG)
-
-    # ── Marcador MIN (azul claro) con etiqueta ───────────────────────────────
-    if temps["min_pos"]:
-        my = int(temps["min_pos"][0] * h / FRAME_ROWS)
-        mx = int(temps["min_pos"][1] * w / FRAME_COLS)
-        cv2.drawMarker(display, (mx, my), COLOR_COLD, cv2.MARKER_CROSS, 16, 2)
-        _put_text_shadowed(display, f"{temps['min']:.1f}C", (mx + 8, my - 6), 0.55, COLOR_COLD)
-
-    # ── Marcador MAX (rojo) con etiqueta ────────────────────────────────────
-    if temps["max_pos"]:
-        my = int(temps["max_pos"][0] * h / FRAME_ROWS)
-        mx = int(temps["max_pos"][1] * w / FRAME_COLS)
-        cv2.drawMarker(display, (mx, my), COLOR_HOT, cv2.MARKER_CROSS, 16, 2)
-        _put_text_shadowed(display, f"{temps['max']:.1f}C", (mx + 8, my - 6), 0.55, COLOR_HOT)
 
 
 def run_live_view(args):
@@ -231,12 +164,12 @@ def run_live_view(args):
                     overlay = last_display.copy()
                     cv2.rectangle(overlay, (0, 0), (disp_w, disp_h), (0, 0, 0), -1)
                     cv2.addWeighted(overlay, 0.55, last_display, 0.45, 0, last_display)
-                    _put_text_shadowed(last_display, "SIGNAL LOST",
-                                       (disp_w // 2 - 90, disp_h // 2),
-                                       0.9, (0, 60, 255), 2)
-                    _put_text_shadowed(last_display, "check SPI wiring",
-                                       (disp_w // 2 - 80, disp_h // 2 + 30),
-                                       0.55, (200, 200, 200))
+                    put_text_shadowed(last_display, "SIGNAL LOST",
+                                      (disp_w // 2 - 90, disp_h // 2),
+                                      0.9, (0, 60, 255), 2)
+                    put_text_shadowed(last_display, "check SPI wiring",
+                                      (disp_w // 2 - 80, disp_h // 2 + 30),
+                                      0.55, (200, 200, 200))
                     cv2.imshow("Lepton Thermal Camera", last_display)
                     cv2.waitKey(500)
                 continue
@@ -260,7 +193,7 @@ def run_live_view(args):
             draw_overlay(display, celsius_big, show_temp, center_temp)
 
             info = f"{colormap_name(cmap_id)}  |  {fps_str}"
-            _put_text_shadowed(display, info, (8, disp_h - 10), 0.5, (200, 200, 200))
+            put_text_shadowed(display, info, (8, disp_h - 10), 0.5, (200, 200, 200))
 
             last_display = display.copy()
             cv2.imshow("Lepton Thermal Camera", display)

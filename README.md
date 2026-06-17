@@ -55,6 +55,26 @@ python3 lepton_viewer.py --capture test
 
 **Controls (live view):** `s` save, `f` FFC, `c` colormap, `t` temp overlay, `q` quit.
 
+## Web interface
+
+A browser-based viewer for demos and classrooms. Multiple devices (phones,
+laptops) can connect to the same live stream at once — no install on the client
+side. Run it on the Pi:
+
+```bash
+python3 lepton_web.py
+```
+
+Then open `http://<pi-ip>:8000` from any device on the same network. The page
+has a live thermal stream plus interactive controls: an emissivity slider with
+material presets, background temperature, colormap selector, and an FFC button.
+The educational panel shows the correction formula and the raw-vs-corrected
+center-spot temperature in real time.
+
+All clients share one capture loop (the SPI sensor is a single resource), so
+settings changes are collaborative and visible to everyone — well suited to an
+instructor-led demo.
+
 ## Emissivity correction
 
 By default the Lepton assumes emissivity = 1.0 (perfect blackbody). Real materials emit less radiation, which biases absolute temperature readings. Pass `--emissivity` and `--background-temp` to compensate:

@@ -22,6 +22,7 @@ from lepton.radiometry import (
     apply_emissivity,
     auto_range,
     normalize_frame,
+    center_box_temp,
     EMISSIVITY,
 )
 
@@ -60,15 +61,6 @@ def parse_args():
     p.add_argument("--emissivity", type=float, default=0.98, help="Initial emissivity")
     p.add_argument("--background-temp", type=float, default=20.0, help="Background temp (C)")
     return p.parse_args()
-
-
-def center_box_temp(celsius, box=3):
-    """Mean of a box x box region at the center of the original-resolution frame."""
-    h, w = celsius.shape
-    cr, cc = h // 2, w // 2
-    half = box // 2
-    region = celsius[cr - half:cr + half + 1, cc - half:cc + half + 1]
-    return float(region.mean())
 
 
 def preset_label(emissivity):
