@@ -131,6 +131,35 @@ python3 lepton_viewer.py --spi-speed 16000000 --temp
 
 ---
 
+## 4.3 Unattended deployment (web service + hotspot)
+
+To run the web interface automatically on boot — headless, no keyboard or monitor —
+use the installer. It creates a virtualenv, enables SPI/I2C, registers a systemd
+service, and (with `--hotspot`) turns the Pi into a WiFi access point.
+
+```bash
+cd ~/pyleptonv2
+sudo ./install.sh --hotspot
+sudo reboot          # required so SPI/I2C devices appear
+```
+
+After reboot, join the `LeptonCam` WiFi (password `leptonthermal`) and open
+`http://192.168.4.1:8000`. Change `SSID`, `WIFI_PASS`, `AP_IP`, or `PORT` at the
+top of `install.sh` before running.
+
+| Command | Action |
+|---|---|
+| `systemctl status lepton-web` | Check the service |
+| `sudo systemctl restart lepton-web` | Restart after a change |
+| `journalctl -u lepton-web -f` | Live logs |
+| `sudo ./install.sh --uninstall` | Remove service + hotspot (restores WiFi internet) |
+
+> The hotspot uses the Pi's only WiFi radio, so internet over WiFi is unavailable
+> while it is active. Install dependencies before enabling the hotspot (the
+> installer does this automatically).
+
+---
+
 ## 5. Troubleshooting
 
 | Symptom | Likely cause | Solution |

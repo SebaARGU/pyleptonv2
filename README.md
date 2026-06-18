@@ -75,6 +75,50 @@ All clients share one capture loop (the SPI sensor is a single resource), so
 settings changes are collaborative and visible to everyone — well suited to an
 instructor-led demo.
 
+## Deployment (kiosk mode)
+
+`install.sh` sets up the Pi to run the web interface unattended — no keyboard or
+monitor needed. It installs dependencies in a virtualenv, enables SPI/I2C,
+registers a systemd service that starts on boot, and optionally turns the Pi into
+a WiFi access point with a fixed IP.
+
+```bash
+# Service only (Pi stays on your existing network)
+sudo ./install.sh
+
+# Service + WiFi access point (Pi broadcasts its own network)
+sudo ./install.sh --hotspot
+```
+
+Edit the variables at the top of `install.sh` first if you want a different
+`SSID`, `WIFI_PASS`, `AP_IP`, or `PORT` (defaults: `LeptonCam` / `leptonthermal`
+/ `192.168.4.1` / `8000`).
+
+**Reboot after the first install** so the freshly enabled SPI/I2C devices
+(`/dev/spidev0.0`, `/dev/i2c-1`) appear:
+
+```bash
+sudo reboot
+```
+
+**Connecting in hotspot mode:** join the `LeptonCam` WiFi network from your phone
+or laptop, then open `http://192.168.4.1:8000`. The Pi serves DHCP, so the device
+gets an address automatically.
+
+**Useful commands:**
+
+```bash
+systemctl status lepton-web        # service state
+sudo systemctl restart lepton-web  # restart after a code change
+journalctl -u lepton-web -f        # live logs
+sudo ./install.sh --uninstall      # remove service + hotspot
+```
+
+> Enabling the hotspot disconnects the Pi from WiFi internet (single radio). The
+> installer always installs dependencies first and configures the access point
+> last. To get internet back, run `--uninstall` or
+> `nmcli connection down lepton-hotspot`.
+
 ## Emissivity correction
 
 By default the Lepton assumes emissivity = 1.0 (perfect blackbody). Real materials emit less radiation, which biases absolute temperature readings. Pass `--emissivity` and `--background-temp` to compensate:
