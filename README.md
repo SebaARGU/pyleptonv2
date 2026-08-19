@@ -55,6 +55,38 @@ python3 lepton_viewer.py --capture test
 
 **Controls (live view):** `s` save, `f` FFC, `c` colormap, `t` temp overlay, `q` quit.
 
+## Use as a Python library
+
+Install in editable mode so changes to the code are reflected immediately:
+
+```bash
+pip install -e .
+```
+
+Then import and use it like OpenCV:
+
+```python
+import cv2
+from lepton import LeptonSPI
+from lepton import raw_to_celsius, apply_colormap, COLORMAP_IRONBLACK
+from lepton.radiometry import auto_range, normalize_frame, apply_emissivity
+
+with LeptonSPI() as lepton:
+    raw = lepton.get_frame()          # uint16[80,60]
+
+    celsius = apply_emissivity(raw_to_celsius(raw), 0.98, 20.0)
+
+    vmin, vmax = auto_range(raw)
+    norm = normalize_frame(raw, vmin, vmax)
+    rgb = apply_colormap(norm, COLORMAP_IRONBLACK)
+    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+    cv2.imshow("thermal", cv2.resize(bgr, (480, 360), interpolation=cv2.INTER_NEAREST))
+    cv2.waitKey(0)
+```
+
+Available colormaps: `COLORMAP_GRAYSCALE`, `COLORMAP_IRONBLACK`, `COLORMAP_RAINBOW`.
+
 ## Web interface
 
 A browser-based viewer for demos and classrooms. Multiple devices (phones,
