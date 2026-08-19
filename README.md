@@ -173,8 +173,6 @@ python3 lepton_viewer.py --emissivity 0.98 --background-temp 22 --temp
 
 Formula applied: `T_real = (T_measured − (1 − ε) × T_background) / ε`
 
-Note: sensor accuracy is ±5°C — emissivity correction improves systematic bias but does not increase absolute accuracy beyond the hardware limit.
-
 ## Notes
 
 - Assumes TLinear (radiometric) mode — raw values are centikelvin.
