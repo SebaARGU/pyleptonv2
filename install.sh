@@ -89,13 +89,20 @@ setup_hotspot() {
         return
     fi
     warn "Enabling the hotspot will DISCONNECT the Pi from WiFi internet."
+
+    if systemctl is-active --quiet dnsmasq 2>/dev/null; then
+        log "Stopping and disabling system dnsmasq (conflicts with NetworkManager hotspot)..."
+        systemctl stop dnsmasq
+        systemctl disable dnsmasq
+    fi
+
     log "Configuring WiFi access point '$SSID' at $AP_IP..."
 
     nmcli connection delete "$HOTSPOT_CON" >/dev/null 2>&1 || true
     nmcli connection add type wifi ifname wlan0 con-name "$HOTSPOT_CON" \
         autoconnect yes ssid "$SSID"
     nmcli connection modify "$HOTSPOT_CON" \
-        802-11-wireless.mode ap 802-11-wireless.band bg \
+        802-11-wireless.mode ap \
         ipv4.method shared ipv4.addresses "$AP_IP/24" \
         wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$WIFI_PASS"
     nmcli connection up "$HOTSPOT_CON"
